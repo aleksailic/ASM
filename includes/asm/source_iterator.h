@@ -2,6 +2,7 @@
 #define __SOURCE_ITERATOR_H__
 
 #include "parser.h"
+#include "errors.h"
 #include <fstream>
 
 namespace ASM {
@@ -33,6 +34,7 @@ namespace ASM {
 				context.line_num = EOF;
 				return *this;
 			}
+			context.line_num++;
 
 			// reset data on every new iteration
 			context.data.clear();
@@ -57,8 +59,12 @@ namespace ASM {
 				}
 			}
 
-			context.line_num++;
-			return *this;
+			// if there are nonwhitespace characters not picked up by parsers that is syntax error
+			if (!std::all_of(line.begin(), line.end(), isspace))
+				throw syntax_error(context.line_num, line);
+
+			// skip empty lines as they don't do anything to source code
+			return context.data.empty() ? operator++() : *this;
 		}
 		bool operator==(const self_type& rhs) { return STRUCT_EQ(context, rhs.context, line_num); }
 		bool operator!=(const self_type& rhs) { return !STRUCT_EQ(context, rhs.context, line_num); }

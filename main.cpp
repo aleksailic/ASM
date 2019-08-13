@@ -9,6 +9,7 @@ static const ASM::parser get_parser(ASM::flags_t type) {
 		if (parser.flags & type)
 			return parser;
 	}
+	throw std::runtime_error("Fatal error! Parser not defined");
 }
 
 TEST_CASE("REGEX check") {
@@ -44,11 +45,28 @@ TEST_CASE("REGEX check") {
 		std::remove("testfile");
 	}
 }
+TEST_CASE("HasVec structure check") {
+	HashVec<std::string> symtable;
+
+	symtable["jovana"] = "jankovic";
+	symtable[0] = "milankovic";
+
+	REQUIRE(symtable["jovana"] == "milankovic");
+	REQUIRE(symtable["jovana"].key == "jovana");
+	REQUIRE(symtable["jovana"].index == 0);
+	REQUIRE(symtable[0].index == 0);
+
+	symtable["milenko"] = "milenkovic";
+
+	REQUIRE(symtable[1].key == "milenko");
+	REQUIRE(symtable["milenko"].index == 1);
+
+}
 
 
 int main(int argc, char* argv[]) {
 	const char* args[] = { argv[0] };
-	int result = Catch::Session().run(1, args);
+	Catch::Session().run(1, args);
 
 	ASM::init(argc, argv);
 

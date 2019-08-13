@@ -26,33 +26,37 @@ namespace ASM {
 	template <typename T> using vector = std::vector<T>;
 
 #ifndef OP_NUM
+#define WORD_SZ 1
 #define OP_NUM 2
 #define OP_DESC_SZ 8
-#define OP_ADDR_SHIFT(n) OP_DESC_SZ*(OP_NUM-n) + 5
+#define OP_ADDR_SHIFT(n) OP_DESC_SZ*(OP_NUM-n) + 5 //3bits for addressing mode
+#define OP_REG_SHIFT(n)  OP_DESC_SZ*(OP_NUM-n) + 1 //4bits for registers
 
-	// address modes
-#define IMMED(n)	0x0 << OP_ADDR_SHIFT(n)
-#define REGDIR(n)	0x1 << OP_ADDR_SHIFT(n)
-#define REGIND(n)	0x2	<< OP_ADDR_SHIFT(n)
-#define REGIND8(n)	0x3	<< OP_ADDR_SHIFT(n)
-#define REGIND16(n)	0x4	<< OP_ADDR_SHIFT(n)
-#define MEM(n)		0x5	<< OP_ADDR_SHIFT(n)
+// operand enable bit
+#define ENABLE(n)   (0x1  << OP_REG_SHIFT(n))
+// address modes
+#define IMMED(n)	((0x0 << OP_ADDR_SHIFT(n)) | ENABLE(n))
+#define REGDIR(n)	((0x1 << OP_ADDR_SHIFT(n)) | ENABLE(n))
+#define REGIND(n)	((0x2 << OP_ADDR_SHIFT(n)) | ENABLE(n))
+#define REGIND8(n)	((0x3 << OP_ADDR_SHIFT(n)) | ENABLE(n))
+#define REGIND16(n)	((0x4 << OP_ADDR_SHIFT(n)) | ENABLE(n))
+#define MEM(n)		((0x5 << OP_ADDR_SHIFT(n)) | ENABLE(n))
 // symbol addressing modes
-#define SYM(n)		0x1	<< OP_ADDR_SHIFT(n) - 2
-#define SYMADDR(n)	0x3	<< OP_ADDR_SHIFT(n) - 2
+#define SYM(n)		((0x8  << OP_REG_SHIFT(n)) | ENABLE(n))
+#define SYMADDR(n)	((0x4  << OP_REG_SHIFT(n)) | ENABLE(n))
 
 #define REG(n)
 #endif
 	enum Types {
-		EMPTY = 0x00 << OP_NUM * OP_DESC_SZ,
-		LABEL = 0x80 << OP_NUM * OP_DESC_SZ,
-		SECTION = 0x40 << OP_NUM * OP_DESC_SZ,
-		RELOC = 0x20 << OP_NUM * OP_DESC_SZ,
-		EQU = 0x10 << OP_NUM * OP_DESC_SZ,
-		END = 0x08 << OP_NUM * OP_DESC_SZ,
-		INSTRUCTION = 0x04 << OP_NUM * OP_DESC_SZ,
-		EXTENDED = 0x02 << OP_NUM * OP_DESC_SZ,
-		SUCCESS = 0x01 << OP_NUM * OP_DESC_SZ
+		EMPTY		= 0x000 << OP_NUM * OP_DESC_SZ,
+		LABEL		= 0x080 << OP_NUM * OP_DESC_SZ,
+		SECTION		= 0x040 << OP_NUM * OP_DESC_SZ,
+		RELOC		= 0x020 << OP_NUM * OP_DESC_SZ,
+		EQU			= 0x010 << OP_NUM * OP_DESC_SZ,
+		END			= 0x008 << OP_NUM * OP_DESC_SZ,
+		INSTRUCTION = 0x004 << OP_NUM * OP_DESC_SZ,
+		EXTENDED	= 0x002 << OP_NUM * OP_DESC_SZ,
+		SUCCESS		= 0x001 << OP_NUM * OP_DESC_SZ
 	};
 	typedef uint_fast32_t flags_t;
 
@@ -63,7 +67,7 @@ namespace ASM {
 	};
 
 	struct parser {
-		flags_t flags;
+		const flags_t flags;
 		vector<string> regexes;
 		vector<vector<parser>> callbacks;
 
@@ -88,7 +92,7 @@ namespace ASM {
 							parsed_t cb_parsed = callback.parse(values.back());
 							// success!
 							if (cb_parsed.flags & SUCCESS) {
-								flags |= callback.flags; //update working flags
+								flags |= cb_parsed.flags; //update working flags
 								values.pop_back(); // remove last element
 								values.insert(values.end(), cb_parsed.values.begin(), cb_parsed.values.end()); // append to working vector
 								break; // no need to be running in this region anymore!
@@ -108,10 +112,10 @@ namespace ASM {
 	// definition of parsers that do regex magic
 	const parser parsers[] = {
 		{LABEL, {"^\\s*(\\w+):"}},
-		{SECTION, {"\\.section\\s*\\\"\\.(\\w+)\\\"", "\\.(data)", "\\.(text)", "\\.(bss)"}},
-		{RELOC, {"\\.(global|extern)\\s*([\\w,]+)"}},
-		{EQU, {"\\.equ\\s*(\\w+),\\s*(\\w+)"}},
-		{INSTRUCTION, {"\\s*(halt|xchg|int|mov|add|sub|mul|div|cmp|not|and|or|xor|test|shl|shr|push|pop|jmp|jeq|jne|jgt|call|ret|iret)"}, {
+		{SECTION, {"^\\s*\\.section\\s*\\\"\\.(\\w+)\\\"", "\\.(data)", "\\.(text)", "\\.(bss)"}},
+		{RELOC, {"^\\s*\\.(global|extern)\\s*([\\w,]+)"}},
+		{EQU, {"^\\s*\\.equ\\s*(\\w+),\\s*(\\w+)"}},
+		{INSTRUCTION, {"^\\s*(halt|xchg|int|mov|add|sub|mul|div|cmp|not|and|or|xor|test|shl|shr|push|pop|jmp|jeq|jne|jgt|call|ret|iret)"}, {
 			{
 				{EXTENDED, {"^(w)"}}
 			},
@@ -126,21 +130,20 @@ namespace ASM {
 				{MEM(1), {"^\\s*\\\*(\\d+)"}}
 			},
 			{
-				{0, {"^\\s*,"}}
-			},
-			{
-				{IMMED(2), {"^\\s*(\\d+)"}},
-				{REGDIR(2), {"^\\s*r([0-7])", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}},
-				{REGIND(2), {"^\\s*\\\[r([0-7])\\\]", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}, {{
-					{REGIND16(2), {"^\\s*\\\[(\\d+)\\\]"}},
-					{REGIND16(2) | SYM(2), {"^\\s*\\\[(\\w+)\\\]"}}
-				}}},
-				{SYM(2), {"^\\s*(\\w+)"}},
-				{SYMADDR(2), {"^\\s*&(\\w+)"}},
-				{MEM(2), {"^\\s*\\\*(\\d+)"}}
+				{0, {"^\\s*,"},{{
+					{IMMED(2), {"^\\s*(\\d+)", "^\\s*'(\\w)'"}},
+					{REGDIR(2), {"^\\s*r([0-7])", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}},
+					{REGIND(2), {"^\\s*\\\[r([0-7])\\\]", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}, {{
+						{REGIND16(2), {"^\\s*\\\[(\\d+)\\\]"}},
+						{REGIND16(2) | SYM(2), {"^\\s*\\\[(\\w+)\\\]"}}
+					}}},
+					{SYM(2), {"^\\s*(\\w+)"}},
+					{SYMADDR(2), {"^\\s*&(\\w+)"}},
+					{MEM(2), {"^\\s*\\\*(\\d+)"}}
+				}}}
 			}
 		}},
-		{END, {"\\.end"}}
+		{END, {"^\\s*\\.end"}}
 	};
 
 }
