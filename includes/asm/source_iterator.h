@@ -5,6 +5,22 @@
 #include "errors.h"
 #include <fstream>
 
+// Helper expanding macro that checks for partial struct equality given respectable struct's fields
+#ifndef STRUCT_EQ
+#ifndef COUNT_VARARGS
+#define _GET_NTH_ARG(_1, _2, _3, _4, N, ...) N
+#define COUNT_VARARGS(...) _GET_NTH_ARG(__VA_ARGS__, 4, 3, 2, 1)
+#define CONCAT(a, b) a##_##b
+#define CONCAT2(a, b) CONCAT(a, b)
+#endif
+
+#define STRUCT_EQ_FN(LHS, RHS, FIELD) (LHS.FIELD == RHS.FIELD)
+#define STRUCT_EQ_1(LHS, RHS, FIELD) STRUCT_EQ_FN(LHS, RHS, FIELD) 
+#define STRUCT_EQ_2(LHS, RHS, FIELD, ...) STRUCT_EQ_FN(LHS, RHS, FIELD) && STRUCT_EQ_1(LHS, RHS, __VA_ARGS__)
+#define STRUCT_EQ_3(LHS, RHS, FIELD, ...) STRUCT_EQ_FN(LHS, RHS, FIELD) && STRUCT_EQ_2(LHS, RHS, __VA_ARGS__)
+#define STRUCT_EQ(LHS,RHS, ...) CONCAT2(STRUCT_EQ, COUNT_VARARGS(__VA_ARGS__) )(LHS,RHS,__VA_ARGS__)
+#endif
+
 namespace ASM {
 	using string = std::string;
 	template <typename T> using vector = std::vector<T>;

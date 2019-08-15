@@ -44,8 +44,35 @@ TEST_CASE("REGEX check") {
 		
 		std::remove("testfile");
 	}
+
+	SECTION("Checking if parser recursion works properly") {
+		parsed_t data = get_parser(ALLOC).parse(".byte 1,2 ,3,4,  5, 6");
+		REQUIRE(data.values[0] == "byte");
+		REQUIRE(data.values[1] == "1");
+		REQUIRE(data.values[2] == "2");
+		REQUIRE(data.values[3] == "3");
+		REQUIRE(data.values[4] == "4");
+		REQUIRE(data.values[5] == "5");
+		REQUIRE(data.values[6] == "6");
+	}
+
+	SECTION("Checking NUMCHAR parsing") {
+		parsed_t data = get_parser(ALLOC).parse(".byte 'W', 'O', 'R', 'D', '\\n'");
+		REQUIRE(data.values[1] == "W");
+		REQUIRE(data.values[5] == "\\n");
+	}
+
+	SECTION("Checking skip/align") {
+		parsed_t data = get_parser(SKIP).parse(".skip 5,7");
+		REQUIRE(data.values[1] == "5");
+		REQUIRE(data.values[2] == "7");
+		data = get_parser(ALIGN).parse(".align 5,   7");
+		REQUIRE(data.values[1] == "5");
+		REQUIRE(data.values[2] == "7");
+	}
 }
 TEST_CASE("HasVec structure check") {
+	using namespace ASM;
 	HashVec<std::string> symtable;
 
 	symtable["jovana"] = "jankovic";
@@ -63,12 +90,49 @@ TEST_CASE("HasVec structure check") {
 
 }
 
+TEST_CASE("Address mask chekcs") {
+	using namespace ASM;
+	REQUIRE(MODE_MASK(REGDIR(1) | INSTRUCTION, 1) == REGDIR(1));
+	REQUIRE(MODE_MASK(IMMED(2) | INSTRUCTION, 2) == IMMED(2));
+	REQUIRE(MODE_MASK(IMMED(1) | INSTRUCTION, 1) != IMMED(2));
+
+	REQUIRE(ADDR_MASK(REGDIR(2), 2) == 0x1 << 5);
+	REQUIRE(ADDR_MASK(REGIND8(1), 1) == 0x3 << 5);
+}
+
+using string = std::string;
 
 int main(int argc, char* argv[]) {
-	const char* args[] = { argv[0] };
-	Catch::Session().run(1, args);
+	try {
+		cxxopts::Options options(argv[0], "Assembler for a simple 16-bit 2-address processor with von Neumann architecture ");
+		options.add_options()
+			("o,output", "Output file", cxxopts::value<string>()->default_value("a.o"))
+			("h,help", "Print help")
+			("t,test", "Run tests")
+			("source", "Source file", cxxopts::value<string>());
 
-	ASM::init(argc, argv);
+		options.positional_help("<SOURCE>");
+		options.parse_positional({ "source" });
+		auto result = options.parse(argc, argv);
 
-	ASM::assemble();
+		auto arguments = result.arguments();
+		if (result.count("help")) {
+			std::cout << options.help({ "" }) << std::endl;
+			exit(0);
+		}
+
+		if (result.count("test")) {
+			const char* args[] = { argv[0] };
+			Catch::Session().run(1, args);
+			exit(0);
+		}
+
+		ASM::init(result["source"].as<string>(), result["output"].as<string>());
+
+		ASM::assemble();
+	}
+	catch (std::exception& ex) {
+		std::cerr << ex.what() << '\n';
+		exit(1);
+	}
 }

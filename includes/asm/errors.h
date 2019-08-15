@@ -15,6 +15,7 @@ static std::string string_format(const std::string& format, Args ... args) {
 namespace ASM {
 	struct syntax_error : public std::exception {
 		std::string m_msg;
+		syntax_error(const std::string& msg = "") : m_msg("Invalid syntax detected. " + msg) {}
 		syntax_error(int line_num, const std::string& line_data) {
 			m_msg = string_format("Invalid syntax detected @ line:%d = %s", line_num, line_data.c_str() );
 		}
