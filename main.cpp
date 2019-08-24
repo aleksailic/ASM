@@ -14,7 +14,7 @@ static const ASM::parser get_parser(ASM::flags_t type) {
 
 TEST_CASE("REGEX check") {
 	using namespace ASM;
-	
+
 	SECTION("Checking if LABELS are correctly detected") {
 		parsed_t data = get_parser(LABEL).parse("\t label1: \n");
 		REQUIRE(data.values[0] == "label1");
@@ -41,7 +41,7 @@ TEST_CASE("REGEX check") {
 			REQUIRE(iter->data[1].values[2] == "bp");
 		}
 
-		
+
 		std::remove("testfile");
 	}
 
@@ -70,6 +70,12 @@ TEST_CASE("REGEX check") {
 		REQUIRE(data.values[1] == "5");
 		REQUIRE(data.values[2] == "7");
 	}
+
+	SECTION("Checkin SYMREL") {
+		parsed_t data = get_parser(INSTRUCTION).parse("call $skip");
+		REQUIRE(data.values[0] == "call");
+		REQUIRE(data.values[1] == "skip");
+	}
 }
 TEST_CASE("HasVec structure check") {
 	using namespace ASM;
@@ -88,6 +94,8 @@ TEST_CASE("HasVec structure check") {
 	REQUIRE(symtable[1].key == "milenko");
 	REQUIRE(symtable["milenko"].index == 1);
 
+	REQUIRE((optable["mov"].flags & E) == E);
+	REQUIRE((optable["jne"].flags & E) == 0);
 }
 
 TEST_CASE("Address mask chekcs") {
@@ -98,6 +106,36 @@ TEST_CASE("Address mask chekcs") {
 
 	REQUIRE(ADDR_MASK(REGDIR(2), 2) == 0x1 << 5);
 	REQUIRE(ADDR_MASK(REGIND8(1), 1) == 0x3 << 5);
+}
+
+TEST_CASE("Stream test") {
+	using namespace ASM;
+
+	SECTION("Checking basic functionality") {
+		Section test;
+
+		REQUIRE(test.counter == 0);
+
+		test.bytes << 0xAD;
+		test.dwords << 0x0A0B;
+
+		REQUIRE(test.counter == 3);
+		REQUIRE(test.memdump() == "AD0B0A");
+	}
+
+
+	SECTION("Checking if works with HashVec") {
+		sections.put("test", Section{});
+		auto& test = sections["test"];
+
+		REQUIRE(sections["test"].counter == 0);
+
+		test.bytes << 0xAD;
+		test.dwords << 0x0A0B;
+		REQUIRE(test.counter == 3);
+		//REQUIRE(test.memdump() == "AD0B0A");
+	}
+
 }
 
 using string = std::string;

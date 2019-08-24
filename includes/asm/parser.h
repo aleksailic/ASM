@@ -31,7 +31,10 @@ int GET_REG(const string& name) {
 	else if (name == "sp")	return 6;
 	else if (name == "pc")	return 7;
 	else try {
-		return std::stoi(name);
+		int num = std::stoi(name);
+		if(num < 0 || num > REG_NUM)
+			throw syntax_error("Invalid register number supplied");
+		return num;
 	}catch(std::invalid_argument& exception) {
 		throw syntax_error("Invalid register number supplied");
 	}
@@ -40,10 +43,10 @@ int GET_REG(const string& name) {
 //3bits for addressing mode
 constexpr flags_t OP_ADDR_SHIFT(int n)	{ return OP_DESC_SZ * (OP_NUM - n) + 5;}
 //4bits for registers
-constexpr flags_t OP_REG_SHIFT(int n)	{ return OP_DESC_SZ * (OP_NUM - n) + 1;}
+constexpr flags_t OP_REG_SHIFT(int n)	{ return OP_DESC_SZ * (OP_NUM - n);}
 
 // operand enable bit
-constexpr flags_t ENABLE(int n) {return 0x1 << OP_REG_SHIFT(n);}
+constexpr flags_t ENABLE(int n)		{ return 0x1 << OP_REG_SHIFT(n);}
 
 // address modes
 constexpr flags_t IMMED(int n)		{ return (0x0 << OP_ADDR_SHIFT(n)) | ENABLE(n);}
@@ -53,16 +56,33 @@ constexpr flags_t REGIND8(int n)	{ return (0x3 << OP_ADDR_SHIFT(n)) | ENABLE(n);
 constexpr flags_t REGIND16(int n)	{ return (0x4 << OP_ADDR_SHIFT(n)) | ENABLE(n);}
 constexpr flags_t MEM(int n )		{ return (0x5 << OP_ADDR_SHIFT(n)) | ENABLE(n);}
 // symbol addressing modes
-constexpr flags_t SYM(int n)		{ return (0x8 << OP_REG_SHIFT(n))  | ENABLE(n);}
-constexpr flags_t SYMADDR(int n)	{ return (0x4 << OP_REG_SHIFT(n))  | ENABLE(n);}
+constexpr flags_t SYMABS(int n)		{ return 0x10 << OP_REG_SHIFT(n);}
+constexpr flags_t SYMREL(int n)		{ return 0x08 << OP_REG_SHIFT(n);}
+constexpr flags_t SYMADR(int n)		{ return 0x04 << OP_REG_SHIFT(n);}
+// lower or higher mark set
+constexpr flags_t REDUCED(int n)	{ return 0x02 << OP_REG_SHIFT(n);}
 
 // operator descriptor mask
 	constexpr flags_t MODE_MASK(flags_t flags, int op_num) {
 		int mask = 0;
-		mask |= 0xFF << OP_DESC_SZ * (OP_NUM - op_num);
+		mask |= 0xFD << OP_DESC_SZ * (OP_NUM - op_num);
 		mask |= ENABLE(op_num);
 		return flags & mask;
 	}
+
+	constexpr void CLEAR_ADDR(flags_t& flags, int op_num) {
+		flags &= ~(0x7 << OP_ADDR_SHIFT(op_num));
+	}
+
+	constexpr void SET_MODE(flags_t& flags, int op_num, flags_t mode) {
+		CLEAR_ADDR(flags, op_num);
+		flags |= mode;
+	}
+
+	constexpr flags_t CLEAR_SYM(flags_t flags, int op_num) {
+		return flags & (~(SYMABS(op_num) | SYMADR(op_num) | SYMREL(op_num)));
+	}
+
 
 	// getting address mode bits from flag
 	constexpr uint8_t ADDR_MASK(flags_t flags, int op_num) {
@@ -71,18 +91,19 @@ constexpr flags_t SYMADDR(int n)	{ return (0x4 << OP_REG_SHIFT(n))  | ENABLE(n);
 	}
 
 	enum Types {
-		EMPTY = 0x000		<< OP_NUM * OP_DESC_SZ,
-		SKIP = 0x400		<< OP_NUM * OP_DESC_SZ,
-		ALIGN = 0x200		<< OP_NUM * OP_DESC_SZ,
-		ALLOC = 0x100		<< OP_NUM * OP_DESC_SZ,
-		LABEL = 0x080		<< OP_NUM * OP_DESC_SZ,
-		SECTION = 0x040		<< OP_NUM * OP_DESC_SZ,
-		RELOC = 0x020		<< OP_NUM * OP_DESC_SZ,
-		EQU = 0x010			<< OP_NUM * OP_DESC_SZ,
-		END = 0x008			<< OP_NUM * OP_DESC_SZ,
+		EMPTY		= 0x000 << OP_NUM * OP_DESC_SZ,
+		END			= 0x800 << OP_NUM * OP_DESC_SZ,
+		SKIP		= 0x400 << OP_NUM * OP_DESC_SZ,
+		ALIGN		= 0x200 << OP_NUM * OP_DESC_SZ,
+		ALLOC		= 0x100 << OP_NUM * OP_DESC_SZ,
+		LABEL		= 0x080 << OP_NUM * OP_DESC_SZ,
+		SECTION		= 0x040 << OP_NUM * OP_DESC_SZ,
+		RELOC		= 0x020 << OP_NUM * OP_DESC_SZ,
+		EQU			= 0x010	<< OP_NUM * OP_DESC_SZ,
+		WORD		= 0x008 << OP_NUM * OP_DESC_SZ,
 		INSTRUCTION = 0x004 << OP_NUM * OP_DESC_SZ,
-		EXTENDED = 0x002	<< OP_NUM * OP_DESC_SZ,
-		SUCCESS = 0x001		<< OP_NUM * OP_DESC_SZ
+		EXTENDED	= 0x002 << OP_NUM * OP_DESC_SZ,
+		SUCCESS		= 0x001 << OP_NUM * OP_DESC_SZ
 	};
 
 	enum Settings {
@@ -181,25 +202,35 @@ constexpr flags_t SYMADDR(int n)	{ return (0x4 << OP_REG_SHIFT(n))  | ENABLE(n);
 				{EXTENDED, {"^w"}}
 			},
 			{
-				{REGDIR(1), {"^\\s*r([0-7])", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}},
+				{REGDIR(1), {"^\\s*r([0-7])", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}, {{
+					{REDUCED(1), {"^(l|h)"}}
+				}}},
 				{REGIND(1), {"^\\s*\\\[r([0-7])\\\]", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}, {{
 					{REGIND16(1), {"^\\s*\\\[(\\d+)\\\]"}},
-					{REGIND16(1) | SYM(1), {"^\\s*\\\[(\\w+)\\\]"}}
+					{REGIND16(1) | SYMABS(1), {"^\\s*\\\[(\\w+)\\\]"}}
+				},{
+					{REDUCED(1), {"^(l|h)"}}
 				}}},
-				{SYM(1), {"^\\s*(\\w+)"}},
-				{SYMADDR(1), {"^\\s*&(\\w+)"}},
+				{IMMED(1) | SYMABS(1), {"^\\s*(\\w+)"}},
+				{IMMED(1) | SYMREL(1), {"^\\s*\\$(\\w+)"}},
+				{IMMED(1) | SYMADR(1), {"^\\s*&(\\w+)"}},
 				{MEM(1), {"^\\s*\\\*(\\d+)"}}
 			},
 			{
 				{0, {"^\\s*,"},{{
 					{IMMED(2), NUMCHAR_REGEXES},
-					{REGDIR(2), {"^\\s*r([0-7])", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}},
+					{REGDIR(2), {"^\\s*r([0-7])", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}, {{
+						{REDUCED(2), {"^(l|h)"}}
+					}}},
 					{REGIND(2), {"^\\s*\\\[r([0-7])\\\]", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}, {{
 						{REGIND16(2), {"^\\s*\\\[(\\d+)\\\]"}},
-						{REGIND16(2) | SYM(2), {"^\\s*\\\[(\\w+)\\\]"}}
+						{REGIND16(2) | SYMABS(2), {"^\\s*\\\[(\\w+)\\\]"}}
+					},{
+						{REDUCED(2), {"^(l|h)"}}
 					}}},
-					{SYM(2), {"^\\s*(\\w+)"}},
-					{SYMADDR(2), {"^\\s*&(\\w+)"}},
+					{IMMED(2) | SYMABS(2), {"^\\s*(\\w+)"}},
+					{IMMED(2) | SYMREL(2), {"^\\s*\\$(\\w+)"}},
+					{IMMED(2) | SYMADR(2), {"^\\s*&(\\w+)"}},
 					{MEM(2), {"^\\s*\\\*(\\d+)"}}
 				}}}
 			}

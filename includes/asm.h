@@ -27,7 +27,7 @@ namespace ASM {
 			return count;
 		}
 		// converts string to integer with addition that if string contains a single char it will convert accordingly
-		int sctoi(const string& str) {
+		uint16_t sctoi(const string& str) {
 			try {
 				return std::stoi(str);
 			}
@@ -61,30 +61,43 @@ namespace ASM {
 				if (utils::bitsize(number) > bitsize)
 					throw std::overflow_error("Overflow. Number passed is larger than stream");
 
-				for (int i = bitsize - 8; i >= 0; i -= 8) {
+				for (int i = 0; i < bitsize; i += 8) {
 					m_section.counter++;
-					m_section.data.push_back( number & (0xFF << i) );
+					m_section.data.push_back(number >> i);
 				}
 				return *this;
 			}
 		};
 	public:
+		Section() = default;
+		Section(const Section& rhs) {
+			counter = rhs.counter;
+			data = rhs.data;
+		}
 		string memdump() {
 			std::ostringstream oss;
 			for (auto& byte : data)
-				oss << std::hex << byte;
+				oss << std::setfill('0') << std::setw(2) << std::hex << std::uppercase << (int)byte;
 			return oss.str();
 		}
-		const stream bytes{ *this, 8 };
+		const stream bytes { *this, 8 };
 		const stream words { *this, WORD_SZ * 8};
 		const stream dwords { *this, DWORD_SZ * 8 };
+
+		const stream& get_stream(int byte_number) {
+			switch (byte_number) {
+				case WORD_SZ: return words;
+				case DWORD_SZ: return dwords;
+				default: throw std::runtime_error("Illegal byte number passed");
+			}
+		}
 		
 	};
 
 	
 	struct Relocation {
 		typedef enum {
-			R_386_PC16
+			R_386_PC16, R_386_16
 		} reloc_t;
 
 		string section;
@@ -98,13 +111,14 @@ namespace ASM {
 	};
 
 	enum {
-		Z	= 1 << 0, //zero
-		O	= 1 << 1, //overflow
-		C	= 1 << 2, //carry
-		N	= 1 << 3, //negative
+		Z	= 1 << 0,  //zero
+		O	= 1 << 1,  //overflow
+		C	= 1 << 2,  //carry
+		N	= 1 << 3,  //negative
+		E	= 1 << 4,  //extensible
 		Tr	= 1 << 13, //timer
 		Tl	= 1 << 14, //terminal
-		I	= 1 << 15 //interrupt
+		I	= 1 << 15  //interrupt
 	};
 
 	struct Instruction {
@@ -140,6 +154,7 @@ namespace ASM {
 			vec.push_back(mapped_type(key, vec.size(), value));
 			map[key] = vec.size() - 1;
 		}
+
 		bool has(const std::string& key) {
 			return map.count(key);
 		}
@@ -174,21 +189,21 @@ namespace ASM {
 	HashVec<Constant> constants;
 	HashVec<Instruction> optable = {
 		{"halt"},
-		{"xchg"},
+		{"xchg", E},
 		{"int"},
-		{"mov", Z | N},
-		{"add", Z | O | C | N},
-		{"sub", Z | O | C | N},
-		{"mul", Z | N},
-		{"div", Z | N},
-		{"cmp", Z | O | C | N},
-		{"not", Z | N},
-		{"and", Z | N},
-		{"or", Z | N},
-		{"xor", Z | N},
-		{"test", Z | N},
-		{"shl", Z | C | N},
-		{"shr", Z | C | N},
+		{"mov", Z | N | E},
+		{"add", Z | O | C | N | E},
+		{"sub", Z | O | C | N | E},
+		{"mul", Z | N | E},
+		{"div", Z | N | E},
+		{"cmp", Z | O | C | N | E},
+		{"not", Z | N | E},
+		{"and", Z | N | E},
+		{"or", Z | N | E},
+		{"xor", Z | N | E},
+		{"test", Z | N | E},
+		{"shl", Z | C | N | E},
+		{"shr", Z | C | N | E},
 		{"push"},
 		{"pop"},
 		{"jmp"},
@@ -234,22 +249,43 @@ namespace ASM {
 					symtable[datum.values[0]] = Symbol{ iter->section, sections[iter->section].counter };
 				}
 				else if (datum.flags & INSTRUCTION) {
+					if (!optable.has(datum.values[0]))
+						throw syntax_error(iter->line_num, datum.values[0], "Instruction doesn't exist");
+					if (!(optable[datum.values[0]].flags & E) && (datum.flags & EXTENDED))
+						throw syntax_error(iter->line_num, iter->line, "This instruction has fixed size");
 					int bytes = INSTR_SZ; // inital value for opcode
+					int op_sz = optable[datum.values[0]].flags & E ? (datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
 
-					for (int i = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++) {
+					for (int i = 1, j = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++, j++) {
+						bytes += 1; //op<num>_desc sz
 						flags_t mode = MODE_MASK(datum.flags, i);
-						if (mode == SYM(i))
-							bytes += 1 + datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ;
-						else if (mode == SYMADDR(i))
-							bytes += 1 + DWORD_SZ;
-						else if (mode == IMMED(i))
-							bytes += utils::bitsize(utils::sctoi(datum.values[i])) > WORD_SZ ? DWORD_SZ : WORD_SZ;
-						else if (mode == REGIND16(i) || mode == REGIND8(i))
-							bytes += utils::bitsize(utils::sctoi(datum.values[i])) > WORD_SZ ? DWORD_SZ : WORD_SZ;
-						else if (mode == (REGIND16(i) | SYM(i)) || mode == (REGIND8(i) | SYM(i)))
-							bytes += datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ;
+
+						// error checking for improper size
+						if ((datum.flags & EXTENDED) && (datum.flags & REDUCED(i)))
+							throw syntax_error(iter->line_num, iter->line, "You cannot use extended instruction with reduced register size");
+
+						if (mode == IMMED(i) || mode == (IMMED(i) | SYMABS(i)))
+							bytes += op_sz;
+						else if (mode == (IMMED(i) | SYMREL(i)) || mode == (IMMED(i) | SYMADR(i)))
+							bytes += DWORD_SZ;
+						else if (mode == (REGIND(i) | REGIND16(i))) {
+							int shift_sz = utils::bitsize(utils::sctoi(datum.values[i])) > WORD_SZ ? DWORD_SZ : WORD_SZ;
+							if (shift_sz == WORD_SZ)
+								SET_MODE(datum.flags, i, REGIND8(i));
+							bytes += shift_sz;
+						}
+						else if (mode == (REGIND(i) | REGIND16(i) | SYMABS(i))) {
+							j++;
+							int shift_sz = constants.has(datum.values[j]) ? (utils::bitsize(utils::sctoi(datum.values[j])) > WORD_SZ ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
+							if (shift_sz == WORD_SZ)
+								SET_MODE(datum.flags, i, REGIND8(i));
+							bytes += shift_sz;
+						}
 						else if (mode == MEM(i))
-							bytes += 1 + DWORD_SZ;
+							bytes += DWORD_SZ;
+						else if ((mode == REGDIR(i) || mode == REGIND(i)) && datum.flags & REDUCED(i))
+							j++;
+
 					}
 
 					sections[iter->section].counter += bytes;
@@ -297,41 +333,102 @@ namespace ASM {
 				} else if (datum.flags & RELOC) {
 					symtable[datum.values[1]].isLocal = false;
 				} else if (datum.flags & INSTRUCTION) {
-					if (!optable.has(datum.values[0]))
-						throw syntax_error(iter->line_num, datum.values[0], "Instruction doesn't exist");
-					uint8_t instr_desc = optable[datum.values[0]].index << 2;
+					uint8_t instr_desc = optable[datum.values[0]].index << 3;
 					if (datum.flags & EXTENDED)
 						instr_desc |= 0x4;
 
-					sections[iter->section].bytes << instr_desc;
+					sections[iter->section].bytes << instr_desc; // pushing instruction desecriptor to stream
 
-					if((datum.flags & ENABLE(2)) && ((datum.flags,1) == IMMED(1) || MODE_MASK(datum.flags, 1) == SYM(1)))
+					if((datum.flags & ENABLE(2)) && ((datum.flags,1) == IMMED(1) || MODE_MASK(datum.flags, 1) == (IMMED(1) | SYMABS(1))))
 						throw syntax_error(iter->line_num, iter->line, "IMMED for dst not allowed.");
 
-					for (int i = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++) {
+					int op_sz = optable[datum.values[0]].flags & E ? (datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
+
+					int j = 1;
+					for (int i = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++, j++) {
 						flags_t mode = MODE_MASK(datum.flags, i);
 						uint8_t op_desc = ADDR_MASK(datum.flags, i);
 
-
-						if (mode == REGDIR(i))
-							op_desc |= GET_REG(datum.values[i]) << 1;
-						else if (mode == SYM(i) || mode == SYMADDR(i)) { // TODO: SYMADDR not done
-							if (constants.has(datum.values[i]))
-								sections[iter->section].dwords << constants[datum.values[i]].value;
-							else if (symtable.has(datum.values[i]))
-								sections[iter->section].dwords << symtable[datum.values[i]].offset;
-							else { // not in symtable
-								symtable[datum.values[i]] = Symbol{ "RELOC" };
-								relocations[datum.values[i]] = Relocation{iter->section, sections[iter->section].counter, symtable[datum.values[i]].index};
-								sections[iter->section].dwords << 0xFFFF; // TODO: parametrize this
+						using reloc_t = Relocation::reloc_t;
+						// FIRST: solve symbols if can be solved !
+						auto symbol_resolver = [&mode, op_sz](string& symbol, const string& section, reloc_t reloc){
+							if (constants.has(symbol)) {
+								if (reloc != reloc_t::R_386_16)
+									throw syntax_error("You cannot use relative relocation on absolute data");
+								symbol = std::to_string(constants[symbol].value);
+							}else if (symtable.has(symbol)) {
+								if (reloc == reloc_t::R_386_16) {
+									symbol = std::to_string(std::stoi(sections[symtable[symbol].section].memdump().substr(2 * symtable[symbol].offset, op_sz * 2),nullptr,16));
+								} else if (reloc == reloc_t::R_386_PC16) {
+									symbol = std::to_string((uint16_t)symtable[symbol].offset - (uint16_t)sections[section].counter);
+								}
 							}
-						} else if (mode == IMMED(i)) {
-							int bytes = utils::bitsize(utils::sctoi(datum.values[i]));
-						}							
+								
+							else { // not in symtable
+								symtable[symbol] = Symbol{ "RELOC", 0xFFFF , false };
+								relocations[symbol] = Relocation{ section, sections[section].counter, symtable[symbol].index, reloc };
+								symbol = std::to_string(std::pow(2,op_sz * 8)-1);
+							}
+						};
+						auto get_sym = [&datum, mode, &j](int i) -> string& {
+							if ((CLEAR_SYM(mode,i) == (REGIND16(i) | REGIND(i))) || (CLEAR_SYM(mode,i) == (REGIND8(i) | REGIND(i))))
+								return datum.values[j+1];
+							else return datum.values[j];
+						};
+
+
+						// call appropriate symbol resolver relocator
+						if (mode & SYMABS(i)) {
+							symbol_resolver(get_sym(i), iter->section, reloc_t::R_386_16);
+						}else if (mode & SYMREL(i)) {
+							symbol_resolver(get_sym(i), iter->section, reloc_t::R_386_PC16);
+						}
+						mode = CLEAR_SYM(mode, i);
+
+
+						if (mode == REGDIR(i) || mode == REGIND(i)) {
+							op_desc |= GET_REG(datum.values[j]) << 1;
+							if ((datum.flags & REDUCED(i)) && (datum.values[++j] == "h")) {
+								op_desc |= 0x1;
+							}
+						} 
+						
+						sections[iter->section].bytes.operator<<(op_desc);  // pushing operator desecriptor to stream
+
+						if (mode == IMMED(i)) {
+							if (utils::bitsize(utils::sctoi(datum.values[j])) > 8 * op_sz)
+								throw syntax_error(iter->line_num, iter->line, "Overflow");
+							sections[iter->section].get_stream(op_sz) << utils::sctoi(datum.values[j]);
+						} else if (mode == (REGIND16(i) | REGIND(i))) {
+							sections[iter->section].dwords << utils::sctoi(datum.values[++j]);
+						} else if (mode == (REGIND8(i) | REGIND(i))) {
+							sections[iter->section].words << utils::sctoi(datum.values[++j]);
+						}
+
 					}
 				}
+				std::cout << '\n';
 			}
-			std::cout << '\n';
+		}
+		std::cout << "SECTION DUMP:\n";
+		for (auto& section : sections) {
+			std::cout << section.key << '\t' << section.counter << '\n';
+			std::cout << section.memdump();
+			std::cout << "\n----------------------------------------\n";
+		}
+		std::cout << "RELOCATION DUMP:\n";
+		for (auto& relocation : relocations) {
+			std::cout << relocation.section << '\t' << relocation.offset << '\t' << (relocation.type == Relocation::reloc_t::R_386_16 ? "R_386_16" : "R_386_PC16") << '\t' << relocation.num << '\n';
+		}
+		std::cout << "\n----------------------------------------\n";
+		std::cout << "SYMTABLE DUMP:\n";
+		for (auto& sym : symtable) {
+			std::cout << sym.key << '\t' << sym.section << '\t' << sym.offset << '\t' << (sym.isLocal ? "local" : "global") << '\t' << sym.index << '\n';
+		}
+		std::cout << "\n----------------------------------------\n";
+		std::cout << "CONSTANTS DUMP:\n";
+		for (auto& constant : constants) {
+			std::cout << constant.key << '\t' << constant.value << '\n';
 		}
 	}
 
