@@ -82,6 +82,11 @@ constexpr flags_t REDUCED(int n)	{ return 0x02 << OP_REG_SHIFT(n);}
 	constexpr flags_t CLEAR_SYM(flags_t flags, int op_num) {
 		return flags & (~(SYMABS(op_num) | SYMADR(op_num) | SYMREL(op_num)));
 	}
+	constexpr flags_t CLEAR_SYM(flags_t flags) {
+		for (int i = 1; i <= OP_NUM; i++)
+			flags &= ~(SYMABS(i) | SYMADR(i) | SYMREL(i));
+		return flags;
+	}
 
 
 	// getting address mode bits from flag
@@ -192,8 +197,8 @@ constexpr flags_t REDUCED(int n)	{ return 0x02 << OP_REG_SHIFT(n);}
 	const parser parsers[] = {
 		{LABEL, {"^\\s*(\\w+):"}},
 		{ALLOC,  "^\\s*\\.(byte|word|dword)" + NUMCHAR_REGEXES, {{ADDITIONAL_ELEMENT(NUMCHAR_REGEXES, RECURSIVE)}}},
-		{ALIGN,  {"^\\s*\\.(align)\\s*(\\d+)" }, {{ADDITIONAL_ELEMENT({"(\\d+)"}, RECURSIVE)}} },
-		{SKIP,  {"^\\s*\\.(skip)\\s*(\\d+)" }, {{ADDITIONAL_ELEMENT({"(\\d+)"}, RECURSIVE)}} },
+		{ALIGN,  {"^\\s*\\.(align)\\s*(\\d+)" }, {{ADDITIONAL_ELEMENT({"(\\d+)"})}} },
+		{SKIP,  {"^\\s*\\.(skip)\\s*(\\d+)" }, {{ADDITIONAL_ELEMENT({"(\\d+)"})}} },
 		{SECTION, {"^\\s*\\.section\\s*\\\"\\.(\\w+)\\\"", "\\.(data)", "\\.(text)", "\\.(bss)"}},
 		{RELOC, {"^\\s*\\.(global|extern|globl)\\s*([\\w,]+)"}},
 		{EQU, {"^\\s*\\.equ\\s*(\\w+),\\s*(\\d+)"}},

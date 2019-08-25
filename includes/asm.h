@@ -11,6 +11,10 @@
 #include <unordered_map>
 #include <fstream>
 
+#ifndef LITTLE_ENDIAN
+#define LITTLE_ENDIAN
+#endif
+
 
 namespace ASM {
 	using string = std::string;
@@ -60,11 +64,17 @@ namespace ASM {
 			const stream& operator<<(int number) const {
 				if (utils::bitsize(number) > bitsize)
 					throw std::overflow_error("Overflow. Number passed is larger than stream");
-
+#ifdef LITTLE_ENDIAN
 				for (int i = 0; i < bitsize; i += 8) {
 					m_section.counter++;
 					m_section.data.push_back(number >> i);
 				}
+#else
+				for (int i = bitsize - 8; i >= 0; i -= 8) {
+					m_section.counter++;
+					m_section.data.push_back(number >> i);
+				}
+#endif
 				return *this;
 			}
 		};
@@ -74,7 +84,7 @@ namespace ASM {
 			counter = rhs.counter;
 			data = rhs.data;
 		}
-		string memdump() {
+		string memdump() const{
 			std::ostringstream oss;
 			for (auto& byte : data)
 				oss << std::setfill('0') << std::setw(2) << std::hex << std::uppercase << (int)byte;
@@ -159,6 +169,12 @@ namespace ASM {
 			return map.count(key);
 		}
 
+		auto begin() const {
+			return vec.begin();
+		}
+		auto end() const {
+			return vec.end();
+		}
 		auto begin() {
 			return vec.begin();
 		}
@@ -174,6 +190,9 @@ namespace ASM {
 
 			return vec[map[key]];
 		}
+
+		template <typename U>
+		friend std::ostream& operator<<(std::ostream& stream, const HashVec<U>& hashvec);
 	};
 
 	template<>
@@ -181,7 +200,53 @@ namespace ASM {
 		return (!map.count(key) || vec[map[key]].section == "RELOC") ? false : true;
 	}
 
+	// specialization for pretty hashvec output
+	template<>
+	std::ostream& operator<<(std::ostream& stream, const HashVec<Symbol>& symbols) {
+		stream << "#tabela simbola\n";
+		stream << "#ime" << '\t' << "sek" << '\t' << "vr." << '\t' << "vid." << '\t' << "r.b." << '\n';
+		for (const auto& symbol : symbols) {
+			stream << symbol.key << '\t' << symbol.section << '\t' << symbol.offset << '\t' << (symbol.isLocal ? "local" : "global") << '\t' << symbol.index << '\n';
+		}
+		return stream;
+	}
+	template<>
+	std::ostream& operator<<(std::ostream& stream, const HashVec<Constant>& constants) {
+		stream << "#tabela konstanti\n";
+		stream << "#ime" << '\t' << "vr." << '\t' << "r.b." << '\n';
+		for (const auto& constant : constants) {
+			stream << constant.key << '\t' << constant.value << '\t' << constant.index << '\t' << '\n';
+		}
+		return stream;
+	}
+	template<>
+	std::ostream& operator<<(std::ostream& stream, const HashVec<Relocation>& relocations) {
+		std::unordered_map<std::string, std::vector<Relocation>> map;
+		for (const auto& relocation : relocations)
+			map[relocation.section].push_back(relocation);
 
+		for (const auto& rel_section : map) {
+			stream << "#.ret." << rel_section.first << '\n';
+			stream << "#ofset" << '\t' << "tip" << "\t\t"  << "vr[." << rel_section.first << "]:\t" << '\n';
+			for (const auto& relocation : rel_section.second) {
+				stream << "0x" << std::setfill('0') << std::setw(DWORD_SZ * 2) << std::hex << std::uppercase;
+				stream << relocation.offset << '\t' << (relocation.type == Relocation::reloc_t::R_386_16 ? "R_386_16" : "R_386_PC16") << '\t' << std::dec << relocation.num << '\n';
+			}
+		}
+		
+		return stream;
+	}
+	template<>
+	std::ostream& operator<<(std::ostream& stream, const HashVec<Section>& sections) {
+		for (const auto& section : sections) {
+			stream << "#." << section.key << " (" << section.counter << ")\n";
+			string memdump = section.memdump();
+			for (int i = 0; i + 1 < memdump.length(); i += 2)
+				stream << memdump[i] << memdump[i + 1] << " ";
+			stream << '\n';
+		}
+		return stream;
+	}
 
 	HashVec<Symbol> symtable;
 	HashVec<Section> sections;
@@ -301,7 +366,7 @@ namespace ASM {
 					sections[iter->section].counter += sections[iter->section].counter % num;
 				}
 				else if (datum.flags & SKIP) {
-					sections[iter->section].counter += std::stoi(datum.values[0]) * WORD_SZ;
+					sections[iter->section].counter += std::stoi(datum.values[1]);
 				}
 				else if (datum.flags & EQU) {
 					constants[datum.values[0]].value = utils::sctoi(datum.values[1]);
@@ -332,6 +397,9 @@ namespace ASM {
 					}
 				} else if (datum.flags & RELOC) {
 					symtable[datum.values[1]].isLocal = false;
+				} else if (datum.flags & SKIP) {
+					for (int i = 0; i < std::stoi(datum.values[1]); i++)
+						sections[iter->section].bytes << std::stoi(datum.values.size() > 2 ? datum.values[2] : "0");
 				} else if (datum.flags & INSTRUCTION) {
 					uint8_t instr_desc = optable[datum.values[0]].index << 3;
 					if (datum.flags & EXTENDED)
@@ -339,13 +407,12 @@ namespace ASM {
 
 					sections[iter->section].bytes << instr_desc; // pushing instruction desecriptor to stream
 
-					if((datum.flags & ENABLE(2)) && ((datum.flags,1) == IMMED(1) || MODE_MASK(datum.flags, 1) == (IMMED(1) | SYMABS(1))))
+					if((datum.flags & ENABLE(2)) && (MODE_MASK(CLEAR_SYM(datum.flags),1) == IMMED(1)))
 						throw syntax_error(iter->line_num, iter->line, "IMMED for dst not allowed.");
 
 					int op_sz = optable[datum.values[0]].flags & E ? (datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
 
-					int j = 1;
-					for (int i = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++, j++) {
+					for (int i = 1, j = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++, j++) {
 						flags_t mode = MODE_MASK(datum.flags, i);
 						uint8_t op_desc = ADDR_MASK(datum.flags, i);
 
@@ -358,7 +425,16 @@ namespace ASM {
 								symbol = std::to_string(constants[symbol].value);
 							}else if (symtable.has(symbol)) {
 								if (reloc == reloc_t::R_386_16) {
-									symbol = std::to_string(std::stoi(sections[symtable[symbol].section].memdump().substr(2 * symtable[symbol].offset, op_sz * 2),nullptr,16));
+									string memdump = sections[symtable[symbol].section].memdump();
+									int off = 2 * symtable[symbol].offset;
+#ifdef LITTLE_ENDIAN
+									int num = 0;
+									for (int i = op_sz * 2 - 2; i >= 0; i -= 2)
+										num += std::stoi(memdump.substr(off + i, 2), nullptr, 16) << (i * 4);
+									symbol = std::to_string(num);
+#else
+									symbol = std::to_string(std::stoi(memdump.substr(off, op_sz * 2), nullptr, 16));
+#endif	
 								} else if (reloc == reloc_t::R_386_PC16) {
 									symbol = std::to_string((uint16_t)symtable[symbol].offset - (uint16_t)sections[section].counter);
 								}
@@ -380,7 +456,9 @@ namespace ASM {
 						// call appropriate symbol resolver relocator
 						if (mode & SYMABS(i)) {
 							symbol_resolver(get_sym(i), iter->section, reloc_t::R_386_16);
-						}else if (mode & SYMREL(i)) {
+						} else if (mode & SYMREL(i)) {
+							symbol_resolver(get_sym(i), iter->section, reloc_t::R_386_PC16);
+						} else if (mode & SYMADR(i)) { // TODO: this has different implementation
 							symbol_resolver(get_sym(i), iter->section, reloc_t::R_386_PC16);
 						}
 						mode = CLEAR_SYM(mode, i);
@@ -410,26 +488,17 @@ namespace ASM {
 				std::cout << '\n';
 			}
 		}
-		std::cout << "SECTION DUMP:\n";
-		for (auto& section : sections) {
-			std::cout << section.key << '\t' << section.counter << '\n';
-			std::cout << section.memdump();
-			std::cout << "\n----------------------------------------\n";
-		}
-		std::cout << "RELOCATION DUMP:\n";
-		for (auto& relocation : relocations) {
-			std::cout << relocation.section << '\t' << relocation.offset << '\t' << (relocation.type == Relocation::reloc_t::R_386_16 ? "R_386_16" : "R_386_PC16") << '\t' << relocation.num << '\n';
-		}
-		std::cout << "\n----------------------------------------\n";
-		std::cout << "SYMTABLE DUMP:\n";
-		for (auto& sym : symtable) {
-			std::cout << sym.key << '\t' << sym.section << '\t' << sym.offset << '\t' << (sym.isLocal ? "local" : "global") << '\t' << sym.index << '\n';
-		}
-		std::cout << "\n----------------------------------------\n";
-		std::cout << "CONSTANTS DUMP:\n";
-		for (auto& constant : constants) {
-			std::cout << constant.key << '\t' << constant.value << '\n';
-		}
+
+		std::ofstream fout (output_path);
+
+		std::cout << relocations;
+		std::cout << sections;
+		std::cout << symtable;
+		std::cout << constants;
+
+		fout << relocations;
+		fout << sections;
+		fout << symtable;
 	}
 
 
