@@ -181,6 +181,9 @@ namespace ASM {
 		auto end() {
 			return vec.end();
 		}
+		auto size() const{
+			return vec.size();
+		}
 		mapped_type& operator[](unsigned int index) {
 			return vec[index];
 		}
@@ -220,7 +223,19 @@ namespace ASM {
 		return stream;
 	}
 	template<>
-	std::ostream& operator<<(std::ostream& stream, const HashVec<Relocation>& relocations) {
+	std::ostream& operator<<(std::ostream& stream, const HashVec<Section>& sections) {
+		for (const auto& section : sections) {
+			if (section.counter == 0) continue;
+			stream << "#." << section.key << " (" << section.counter << ")\n";
+			string memdump = section.memdump();
+			for (int i = 0; i + 1 < memdump.length(); i += 2)
+				stream << memdump[i] << memdump[i + 1] << " ";
+			stream << '\n';
+		}
+		return stream;
+	}
+
+	std::ostream& operator<<(std::ostream& stream, const std::vector<Relocation>& relocations) {
 		std::unordered_map<std::string, std::vector<Relocation>> map;
 		for (const auto& relocation : relocations)
 			map[relocation.section].push_back(relocation);
@@ -236,21 +251,10 @@ namespace ASM {
 		
 		return stream;
 	}
-	template<>
-	std::ostream& operator<<(std::ostream& stream, const HashVec<Section>& sections) {
-		for (const auto& section : sections) {
-			stream << "#." << section.key << " (" << section.counter << ")\n";
-			string memdump = section.memdump();
-			for (int i = 0; i + 1 < memdump.length(); i += 2)
-				stream << memdump[i] << memdump[i + 1] << " ";
-			stream << '\n';
-		}
-		return stream;
-	}
 
 	HashVec<Symbol> symtable;
 	HashVec<Section> sections;
-	HashVec<Relocation> relocations;
+	vector<Relocation> relocations;
 	HashVec<Constant> constants;
 	HashVec<Instruction> optable = {
 		{"halt"},
@@ -320,6 +324,7 @@ namespace ASM {
 						throw syntax_error(iter->line_num, iter->line, "This instruction has fixed size");
 					int bytes = INSTR_SZ; // inital value for opcode
 					int op_sz = optable[datum.values[0]].flags & E ? (datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
+
 
 					for (int i = 1, j = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++, j++) {
 						bytes += 1; //op<num>_desc sz
@@ -396,7 +401,8 @@ namespace ASM {
 						stream << utils::sctoi(*it);
 					}
 				} else if (datum.flags & RELOC) {
-					symtable[datum.values[1]].isLocal = false;
+					if(symtable.has(datum.values[1]))
+						symtable[datum.values[1]].isLocal = false;
 				} else if (datum.flags & SKIP) {
 					for (int i = 0; i < std::stoi(datum.values[1]); i++)
 						sections[iter->section].bytes << std::stoi(datum.values.size() > 2 ? datum.values[2] : "0");
@@ -423,7 +429,7 @@ namespace ASM {
 								if (reloc != reloc_t::R_386_16)
 									throw syntax_error("You cannot use relative relocation on absolute data");
 								symbol = std::to_string(constants[symbol].value);
-							}else if (symtable.has(symbol)) {
+							}else if (symtable.has(symbol) && symtable[symbol].offset != 0xFFFF) {
 								if (reloc == reloc_t::R_386_16) {
 									string memdump = sections[symtable[symbol].section].memdump();
 									int off = 2 * symtable[symbol].offset;
@@ -442,7 +448,7 @@ namespace ASM {
 								
 							else { // not in symtable
 								symtable[symbol] = Symbol{ "RELOC", 0xFFFF , false };
-								relocations[symbol] = Relocation{ section, sections[section].counter, symtable[symbol].index, reloc };
+								relocations.push_back(Relocation{ section, sections[section].counter, symtable[symbol].index, reloc });
 								symbol = std::to_string(std::pow(2,op_sz * 8)-1);
 							}
 						};
