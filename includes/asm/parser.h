@@ -220,11 +220,11 @@ constexpr flags_t REDUCED(int n)	{ return 0x02 << OP_REG_SHIFT(n);}
 					{REGIND16(op) | SYMABS(op), {"^\\s*\\\[(\\w+)\\\]"}, {{}}, OVERRIDE}
 				}
 			}},
+			{MEM(op), {"^\\s*\\\*(\\d+)"} },
 			{IMMED(op), NUMCHAR_REGEXES},
 			{IMMED(op) | SYMABS(op), {"^\\s*(\\w+)"} },
 			{IMMED(op) | SYMREL(op), {"^\\s*\\$(\\w+)"} },
 			{IMMED(op) | SYMADR(op), {"^\\s*&(\\w+)"} },
-			{MEM(op), {"^\\s*\\\*(\\d+)"} }
 		};
 	}
 

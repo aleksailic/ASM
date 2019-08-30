@@ -41,6 +41,10 @@ namespace ASM {
 				else throw exception;
 			}
 		}
+		string tolower(string str) {
+			std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+			return str;
+		}
 	}
 
 	namespace streams {
@@ -125,7 +129,8 @@ namespace ASM {
 		O	= 1 << 1,  //overflow
 		C	= 1 << 2,  //carry
 		N	= 1 << 3,  //negative
-		E	= 1 << 4,  //extensible
+		E	= 1 << 4,  //extensible (variable operand size)
+		Nop	= 1 << 5,  //no operands
 		Tr	= 1 << 13, //timer
 		Tl	= 1 << 14, //terminal
 		I	= 1 << 15  //interrupt
@@ -136,7 +141,15 @@ namespace ASM {
 		flags_t flags = 0;
 	};
 
-	template <typename T>
+	struct hashvec_traits {
+		static constexpr bool icase = false;
+	};
+
+	struct hashvec_traits_icase : hashvec_traits {
+		static constexpr bool icase = true;
+	};
+
+	template <typename T, typename traits = hashvec_traits>
 	class HashVec {
 		struct mapped_type : public T {
 			const std::string key;
@@ -166,7 +179,10 @@ namespace ASM {
 		}
 
 		bool has(const std::string& key) {
-			return map.count(key);
+			if constexpr (traits::icase)
+				return map.count(utils::tolower(key));
+			else
+				return map.count(key);
 		}
 
 		auto begin() const {
@@ -188,23 +204,20 @@ namespace ASM {
 			return vec[index];
 		}
 		mapped_type& operator[](const std::string& key) {
-			if (!map.count(key))
+			if (!has(key))
 				put(key, T{});
 
-			return vec[map[key]];
+			if constexpr (traits::icase)
+				return vec[map[utils::tolower(key)]];
+			else
+				return vec[map[key]];
 		}
 
 		template <typename U>
 		friend std::ostream& operator<<(std::ostream& stream, const HashVec<U>& hashvec);
 	};
 
-	template<>
-	bool HashVec<Symbol>::has(const string& key) {
-		return (!map.count(key) || vec[map[key]].section == "RELOC") ? false : true;
-	}
-
 	// specialization for pretty hashvec output
-	template<>
 	std::ostream& operator<<(std::ostream& stream, const HashVec<Symbol>& symbols) {
 		stream << "#tabela simbola\n";
 		stream << "#ime" << '\t' << "sek" << '\t' << "vr." << '\t' << "vid." << '\t' << "r.b." << '\n';
@@ -213,7 +226,6 @@ namespace ASM {
 		}
 		return stream;
 	}
-	template<>
 	std::ostream& operator<<(std::ostream& stream, const HashVec<Constant>& constants) {
 		stream << "#tabela konstanti\n";
 		stream << "#ime" << '\t' << "vr." << '\t' << "r.b." << '\n';
@@ -222,7 +234,6 @@ namespace ASM {
 		}
 		return stream;
 	}
-	template<>
 	std::ostream& operator<<(std::ostream& stream, const HashVec<Section>& sections) {
 		for (const auto& section : sections) {
 			if (section.counter == 0) continue;
@@ -256,8 +267,9 @@ namespace ASM {
 	HashVec<Section> sections;
 	vector<Relocation> relocations;
 	HashVec<Constant> constants;
-	HashVec<Instruction> optable = {
-		{"halt"},
+	HashVec<Instruction, hashvec_traits_icase> optable = {
+		{"nop", Nop},
+		{"halt", Nop},
 		{"xchg", E},
 		{"int"},
 		{"mov", Z | N | E},
@@ -293,6 +305,18 @@ namespace ASM {
 
 
 	void assemble() {
+		// helper function to fetch proper operand size
+		auto get_op_sz = [](const string& instruction, const flags_t& flags) -> int {
+			//int op_sz = optable[datum.values[0]].flags & E ? (datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
+			if (!optable.has(instruction))
+				throw std::runtime_error("Instruction not in optable");
+			if (optable[instruction].flags & Nop) // no operands
+				return 0;
+			else if (optable[instruction].flags & E) // variable operands
+				return flags & EXTENDED ? DWORD_SZ : WORD_SZ;
+			else
+				return DWORD_SZ;
+		};
 		// first pass
 		std::cout << "FIRST PASS!\n";
 		for (source_iterator iter{ input_path }; (iter != EOF) || (iter->data[0].flags & END); ++iter) {
@@ -323,7 +347,7 @@ namespace ASM {
 					if (!(optable[datum.values[0]].flags & E) && (datum.flags & EXTENDED))
 						throw syntax_error(iter->line_num, iter->line, "This instruction has fixed size");
 					int bytes = INSTR_SZ; // inital value for opcode
-					int op_sz = optable[datum.values[0]].flags & E ? (datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
+					int op_sz = get_op_sz(datum.values[0], datum.flags);
 
 					auto ival = datum.values.begin() + 1; // skipping instruction which is always first
 					for (int i = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++, ival++) {
@@ -357,6 +381,8 @@ namespace ASM {
 						}
 						else if (mode == MEM(i))
 							bytes += DWORD_SZ;
+						else 
+							throw std::runtime_error("fatal error, mode handler not provided");
 
 					}
 
@@ -410,20 +436,21 @@ namespace ASM {
 						sections[iter->section].bytes << std::stoi(datum.values.size() > 2 ? datum.values[2] : "0");
 				} else if (datum.flags & INSTRUCTION) {
 					uint8_t instr_desc = optable[datum.values[0]].index << 3;
-					if (datum.flags & EXTENDED)
+					if (get_op_sz(datum.values[0],datum.flags) == DWORD_SZ)
 						instr_desc |= 0x4;
 
 					sections[iter->section].bytes << instr_desc; // pushing instruction desecriptor to stream
 
-					if((datum.flags & ENABLE(2)) && (MODE_MASK(CLEAR_SYM(datum.flags),1) == IMMED(1)))
-						throw syntax_error(iter->line_num, iter->line, "IMMED for dst not allowed.");
+					//if((datum.flags & ENABLE(2)) && (MODE_MASK(CLEAR_SYM(datum.flags),1) == IMMED(1)))
+					//	throw syntax_error(iter->line_num, iter->line, "IMMED for dst not allowed.");
 
 					auto ival = datum.values.begin() + 1; //skipping instructions
 					for (int i = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++, ival++) {
 						flags_t mode = MODE_MASK(datum.flags, i);
 						uint8_t op_desc = ADDR_MASK(datum.flags, i);
 
-						int op_sz = optable[datum.values[0]].flags & E ? (datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
+						int op_sz = get_op_sz(datum.values[0], datum.flags);
+						// override in case of regind with movement as it doesn't care for optable
 						if (CLEAR_SYM(mode, i) == REGIND8(i))
 							op_sz = WORD_SZ;
 						else if (CLEAR_SYM(mode, i) == REGIND16(i))
@@ -432,6 +459,10 @@ namespace ASM {
 						using reloc_t = Relocation::reloc_t;
 						// FIRST: solve symbols if can be solved !
 						auto symbol_resolver = [op_desc, op_sz](string& symbol, const string& section, reloc_t reloc){
+							auto make_relocation = [&]() {
+								relocations.push_back(Relocation{ section, sections[section].counter + 1, symtable[symbol].index, reloc }); // counter + 1 is dirty fix because symbol resolvment happens before opdesc is pushed to stream and that can never be subject to relocation as it is always known
+								symbol = std::to_string(std::pow(2, op_sz * 8) - 1);
+							};
 							if (constants.has(symbol)) {
 								if (reloc != reloc_t::R_386_16)
 									throw syntax_error("You cannot use relative relocation on absolute data");
@@ -440,6 +471,9 @@ namespace ASM {
 								if (reloc == reloc_t::R_386_16) {
 									string memdump = sections[symtable[symbol].section].memdump();
 									int off = 2 * symtable[symbol].offset;
+									// if mem has not yet been populated we cannot access it - must add relocation
+									if (memdump.size() < off + op_sz * 2)
+										return make_relocation();
 #ifdef LITTLE_ENDIAN
 									int num = 0;
 									for (int i = op_sz * 2 - 2; i >= 0; i -= 2)
@@ -451,12 +485,9 @@ namespace ASM {
 								} else if (reloc == reloc_t::R_386_PC16) {
 									symbol = std::to_string((uint16_t)symtable[symbol].offset - (uint16_t)sections[section].counter);
 								}
-							}
-								
-							else { // not in symtable
+							} else { // not in symtable
 								symtable[symbol] = Symbol{ "RELOC", 0xFFFF , false };
-								relocations.push_back(Relocation{ section, sections[section].counter + 1, symtable[symbol].index, reloc }); // counter + 1 is dirty fix because symbol resolvment happens before opdesc is pushed to stream and that can never be subject to relocation as it is always known
-								symbol = std::to_string(std::pow(2,op_sz * 8)-1);
+								make_relocation();
 							}
 						};
 						auto get_sym = [&datum, mode, &ival](int i) -> string& {
@@ -494,7 +525,12 @@ namespace ASM {
 							sections[iter->section].dwords << utils::sctoi(*++ival);
 						} else if (mode == REGIND8(i)) {
 							sections[iter->section].words << utils::sctoi(*++ival);
+						} else if (mode == MEM(i)) {
+							sections[iter->section].dwords << utils::sctoi(*ival);
+						} else {
+							throw std::runtime_error("fatal error, mode handler not provided");
 						}
+							
 
 					}
 				}

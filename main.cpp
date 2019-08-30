@@ -89,6 +89,9 @@ TEST_CASE("REGEX check") {
 		data = get_parser(INSTRUCTION).parse("movw ax, 3560");
 		REQUIRE(MODE_MASK(data.flags, 1) == REGDIR(1));
 		REQUIRE(MODE_MASK(data.flags, 2) == IMMED(2));
+
+		data = get_parser(INSTRUCTION).parse("push *1233");
+		REQUIRE(MODE_MASK(data.flags, 1) == MEM(1));
 ;	}
 }
 
