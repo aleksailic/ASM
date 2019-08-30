@@ -325,36 +325,38 @@ namespace ASM {
 					int bytes = INSTR_SZ; // inital value for opcode
 					int op_sz = optable[datum.values[0]].flags & E ? (datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
 
-
-					for (int i = 1, j = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++, j++) {
+					auto ival = datum.values.begin() + 1; // skipping instruction which is always first
+					for (int i = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++, ival++) {
 						bytes += 1; //op<num>_desc sz
 						flags_t mode = MODE_MASK(datum.flags, i);
 
 						// error checking for improper size
 						if ((datum.flags & EXTENDED) && (datum.flags & REDUCED(i)))
 							throw syntax_error(iter->line_num, iter->line, "You cannot use extended instruction with reduced register size");
+						
+						// skipping captured reduced if it exists
+						if (datum.flags & REDUCED(i))
+							ival++;
 
 						if (mode == IMMED(i) || mode == (IMMED(i) | SYMABS(i)))
 							bytes += op_sz;
 						else if (mode == (IMMED(i) | SYMREL(i)) || mode == (IMMED(i) | SYMADR(i)))
 							bytes += DWORD_SZ;
-						else if (mode == (REGIND(i) | REGIND16(i))) {
-							int shift_sz = utils::bitsize(utils::sctoi(datum.values[i])) > WORD_SZ ? DWORD_SZ : WORD_SZ;
+						else if (mode == REGIND16(i)) {
+							int shift_sz = utils::bitsize(utils::sctoi(*ival)) > WORD_SZ ? DWORD_SZ : WORD_SZ;
 							if (shift_sz == WORD_SZ)
 								SET_MODE(datum.flags, i, REGIND8(i));
 							bytes += shift_sz;
 						}
-						else if (mode == (REGIND(i) | REGIND16(i) | SYMABS(i))) {
-							j++;
-							int shift_sz = constants.has(datum.values[j]) ? (utils::bitsize(utils::sctoi(datum.values[j])) > WORD_SZ ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
+						else if (mode == (REGIND16(i) | SYMABS(i))) {
+							ival++;
+							int shift_sz = constants.has(*ival) ? (utils::bitsize(utils::sctoi(*ival)) > WORD_SZ ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
 							if (shift_sz == WORD_SZ)
 								SET_MODE(datum.flags, i, REGIND8(i));
 							bytes += shift_sz;
 						}
 						else if (mode == MEM(i))
 							bytes += DWORD_SZ;
-						else if ((mode == REGDIR(i) || mode == REGIND(i)) && datum.flags & REDUCED(i))
-							j++;
 
 					}
 
@@ -416,15 +418,20 @@ namespace ASM {
 					if((datum.flags & ENABLE(2)) && (MODE_MASK(CLEAR_SYM(datum.flags),1) == IMMED(1)))
 						throw syntax_error(iter->line_num, iter->line, "IMMED for dst not allowed.");
 
-					int op_sz = optable[datum.values[0]].flags & E ? (datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
-
-					for (int i = 1, j = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++, j++) {
+					auto ival = datum.values.begin() + 1; //skipping instructions
+					for (int i = 1; (i <= OP_NUM) && (datum.flags & ENABLE(i)); i++, ival++) {
 						flags_t mode = MODE_MASK(datum.flags, i);
 						uint8_t op_desc = ADDR_MASK(datum.flags, i);
 
+						int op_sz = optable[datum.values[0]].flags & E ? (datum.flags & EXTENDED ? DWORD_SZ : WORD_SZ) : DWORD_SZ;
+						if (CLEAR_SYM(mode, i) == REGIND8(i))
+							op_sz = WORD_SZ;
+						else if (CLEAR_SYM(mode, i) == REGIND16(i))
+							op_sz = DWORD_SZ;
+							
 						using reloc_t = Relocation::reloc_t;
 						// FIRST: solve symbols if can be solved !
-						auto symbol_resolver = [&mode, op_sz](string& symbol, const string& section, reloc_t reloc){
+						auto symbol_resolver = [op_desc, op_sz](string& symbol, const string& section, reloc_t reloc){
 							if (constants.has(symbol)) {
 								if (reloc != reloc_t::R_386_16)
 									throw syntax_error("You cannot use relative relocation on absolute data");
@@ -448,14 +455,14 @@ namespace ASM {
 								
 							else { // not in symtable
 								symtable[symbol] = Symbol{ "RELOC", 0xFFFF , false };
-								relocations.push_back(Relocation{ section, sections[section].counter, symtable[symbol].index, reloc });
+								relocations.push_back(Relocation{ section, sections[section].counter + 1, symtable[symbol].index, reloc }); // counter + 1 is dirty fix because symbol resolvment happens before opdesc is pushed to stream and that can never be subject to relocation as it is always known
 								symbol = std::to_string(std::pow(2,op_sz * 8)-1);
 							}
 						};
-						auto get_sym = [&datum, mode, &j](int i) -> string& {
-							if ((CLEAR_SYM(mode,i) == (REGIND16(i) | REGIND(i))) || (CLEAR_SYM(mode,i) == (REGIND8(i) | REGIND(i))))
-								return datum.values[j+1];
-							else return datum.values[j];
+						auto get_sym = [&datum, mode, &ival](int i) -> string& {
+							if ((CLEAR_SYM(mode,i) == REGIND16(i)) || (CLEAR_SYM(mode,i) == REGIND8(i)))
+								return *(ival+1);
+							else return *ival;
 						};
 
 
@@ -470,23 +477,23 @@ namespace ASM {
 						mode = CLEAR_SYM(mode, i);
 
 
-						if (mode == REGDIR(i) || mode == REGIND(i)) {
-							op_desc |= GET_REG(datum.values[j]) << 1;
-							if ((datum.flags & REDUCED(i)) && (datum.values[++j] == "h")) {
+						if (mode == REGDIR(i) || mode == REGIND(i) || mode == REGIND16(i) || mode == REGIND8(i)) {
+							op_desc |= GET_REG(*ival) << 1;
+							if ((datum.flags & REDUCED(i)) && (*++ival == "h")) {
 								op_desc |= 0x1;
 							}
-						} 
+						}
 						
 						sections[iter->section].bytes.operator<<(op_desc);  // pushing operator desecriptor to stream
 
 						if (mode == IMMED(i)) {
-							if (utils::bitsize(utils::sctoi(datum.values[j])) > 8 * op_sz)
+							if (utils::bitsize(utils::sctoi(*ival)) > 8 * op_sz)
 								throw syntax_error(iter->line_num, iter->line, "Overflow");
-							sections[iter->section].get_stream(op_sz) << utils::sctoi(datum.values[j]);
-						} else if (mode == (REGIND16(i) | REGIND(i))) {
-							sections[iter->section].dwords << utils::sctoi(datum.values[++j]);
-						} else if (mode == (REGIND8(i) | REGIND(i))) {
-							sections[iter->section].words << utils::sctoi(datum.values[++j]);
+							sections[iter->section].get_stream(op_sz) << utils::sctoi(*ival);
+						} else if (mode == REGIND16(i)) {
+							sections[iter->section].dwords << utils::sctoi(*++ival);
+						} else if (mode == REGIND8(i)) {
+							sections[iter->section].words << utils::sctoi(*++ival);
 						}
 
 					}

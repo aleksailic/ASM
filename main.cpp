@@ -41,7 +41,6 @@ TEST_CASE("REGEX check") {
 			REQUIRE(iter->data[1].values[2] == "bp");
 		}
 
-
 		std::remove("testfile");
 	}
 
@@ -76,7 +75,23 @@ TEST_CASE("REGEX check") {
 		REQUIRE(data.values[0] == "call");
 		REQUIRE(data.values[1] == "skip");
 	}
+
+	SECTION("Checking addrmode regex") {
+		parsed_t data = get_parser(INSTRUCTION).parse("mov [r7][test]");
+		REQUIRE(MODE_MASK(data.flags, 1) == (REGIND16(1) | SYMABS(1)));
+
+		data = get_parser(INSTRUCTION).parse("mov r7[test]");
+		REQUIRE(MODE_MASK(data.flags, 1) == (REGIND16(1) | SYMABS(1)));
+
+		data = get_parser(INSTRUCTION).parse("jne $printf");
+		REQUIRE(MODE_MASK(data.flags, 1) == (IMMED(1) | SYMREL(1)));
+
+		data = get_parser(INSTRUCTION).parse("movw ax, 3560");
+		REQUIRE(MODE_MASK(data.flags, 1) == REGDIR(1));
+		REQUIRE(MODE_MASK(data.flags, 2) == IMMED(2));
+;	}
 }
+
 TEST_CASE("HasVec structure check") {
 	using namespace ASM;
 	HashVec<std::string> symtable;
@@ -136,6 +151,10 @@ TEST_CASE("Stream test") {
 		//REQUIRE(test.memdump() == "AD0B0A");
 	}
 
+}
+
+TEST_CASE("Running testfiles") {
+	
 }
 
 using string = std::string;

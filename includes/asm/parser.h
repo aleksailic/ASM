@@ -96,7 +96,7 @@ constexpr flags_t REDUCED(int n)	{ return 0x02 << OP_REG_SHIFT(n);}
 	}
 
 	enum Types {
-		EMPTY		= 0x000 << OP_NUM * OP_DESC_SZ,
+		NOFLAG		= 0x000 << OP_NUM * OP_DESC_SZ,
 		END			= 0x800 << OP_NUM * OP_DESC_SZ,
 		SKIP		= 0x400 << OP_NUM * OP_DESC_SZ,
 		ALIGN		= 0x200 << OP_NUM * OP_DESC_SZ,
@@ -114,7 +114,8 @@ constexpr flags_t REDUCED(int n)	{ return 0x02 << OP_REG_SHIFT(n);}
 	enum Settings {
 		DEFAULT		= 0x0,	
 		RECURSIVE	= 0x1,
-		REQUIRED	= 0x2
+		REQUIRED	= 0x2,
+		OVERRIDE	= 0x4
 	};
 
 	struct parsed_t {
@@ -132,16 +133,15 @@ constexpr flags_t REDUCED(int n)	{ return 0x02 << OP_REG_SHIFT(n);}
 		parsed_t parse(const string& line) const {
 			std::vector<string> values;
 			flags_t flags = 0; // no flags initially as no match is default
+			bool overriden = false;
 
 			for (auto& regex : regexes) {
 				std::smatch match;
-				if (std::regex_search(line, match, std::regex(regex))) {
+				if (std::regex_search(line, match, std::regex(regex, std::regex_constants::icase))) {
 					// extract data from capture groups
 					for (size_t i = 1; i < match.size(); i++) {
 						values.push_back(match[i].str());
 					}
-					// sign this match with proper flag data
-					flags = this->flags | SUCCESS;
 
 					// append suffix to the end as it is needed for recursion and callbacks
 					values.push_back(match.suffix());
@@ -162,10 +162,16 @@ constexpr flags_t REDUCED(int n)	{ return 0x02 << OP_REG_SHIFT(n);}
 								flags |= cb_parsed.flags; //update working flags
 								values.pop_back(); // remove last element
 								values.insert(values.end(), cb_parsed.values.begin(), cb_parsed.values.end()); // append to working vector
+								overriden = callback.settings & OVERRIDE;
 								break; // no need to be running in this region anymore!
 							}
 						}
 					}
+
+					// sign data with proper flags
+					flags |= SUCCESS;
+					if(!overriden)
+						flags |= this->flags;
 				}
 			}
 
@@ -192,6 +198,35 @@ constexpr flags_t REDUCED(int n)	{ return 0x02 << OP_REG_SHIFT(n);}
 	}
 
 	static const vector<string> NUMCHAR_REGEXES = { "\\s*(\\d+)", "\\s*'(\\w)'", "\\s*'(\\\\\\w)'" };
+	static const vector<string> REGISTER_REGEXES = { "\\s*r([0-7])", "\\s*(ax)", "\\s*(sp)", "\\s*(bp)", "\\s*(pc)" };
+
+	static vector<parser> ADDR_MODE_PARSERS(int op) {
+		return {
+			{REGDIR(op), "^\\s*" + REGISTER_REGEXES, {
+				{
+					{REDUCED(op), {"^(l|h)"}}
+				},
+				{
+					{REGIND16(op), {"^\\s*\\\[(\\d+)\\\]"}, {{}}, OVERRIDE},
+					{REGIND16(op) | SYMABS(op), {"^\\s*\\\[(\\w+)\\\]"}, {{}}, OVERRIDE}
+				}
+			}},
+			{REGIND(op), "^\\s*\\\[" + REGISTER_REGEXES + "\\\]", {
+				{
+					{REDUCED(op), {"^(l|h)"}}
+				},
+				{
+					{REGIND16(op), {"^\\s*\\\[(\\d+)\\\]"}, {{}}, OVERRIDE},
+					{REGIND16(op) | SYMABS(op), {"^\\s*\\\[(\\w+)\\\]"}, {{}}, OVERRIDE}
+				}
+			}},
+			{IMMED(op), NUMCHAR_REGEXES},
+			{IMMED(op) | SYMABS(op), {"^\\s*(\\w+)"} },
+			{IMMED(op) | SYMREL(op), {"^\\s*\\$(\\w+)"} },
+			{IMMED(op) | SYMADR(op), {"^\\s*&(\\w+)"} },
+			{MEM(op), {"^\\s*\\\*(\\d+)"} }
+		};
+	}
 
 	// definition of parsers that do regex magic
 	const parser parsers[] = {
@@ -206,38 +241,9 @@ constexpr flags_t REDUCED(int n)	{ return 0x02 << OP_REG_SHIFT(n);}
 			{
 				{EXTENDED, {"^w"}}
 			},
+			ADDR_MODE_PARSERS(1),
 			{
-				{REGDIR(1), {"^\\s*r([0-7])", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}, {{
-					{REDUCED(1), {"^(l|h)"}}
-				}}},
-				{REGIND(1), {"^\\s*\\\[r([0-7])\\\]", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}, {{
-					{REGIND16(1), {"^\\s*\\\[(\\d+)\\\]"}},
-					{REGIND16(1) | SYMABS(1), {"^\\s*\\\[(\\w+)\\\]"}}
-				},{
-					{REDUCED(1), {"^(l|h)"}}
-				}}},
-				{IMMED(1) | SYMABS(1), {"^\\s*(\\w+)"}},
-				{IMMED(1) | SYMREL(1), {"^\\s*\\$(\\w+)"}},
-				{IMMED(1) | SYMADR(1), {"^\\s*&(\\w+)"}},
-				{MEM(1), {"^\\s*\\\*(\\d+)"}}
-			},
-			{
-				{0, {"^\\s*,"},{{
-					{IMMED(2), NUMCHAR_REGEXES},
-					{REGDIR(2), {"^\\s*r([0-7])", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}, {{
-						{REDUCED(2), {"^(l|h)"}}
-					}}},
-					{REGIND(2), {"^\\s*\\\[r([0-7])\\\]", "^\\s*(ax)", "^\\s*(sp)", "^\\s*(bp)"}, {{
-						{REGIND16(2), {"^\\s*\\\[(\\d+)\\\]"}},
-						{REGIND16(2) | SYMABS(2), {"^\\s*\\\[(\\w+)\\\]"}}
-					},{
-						{REDUCED(2), {"^(l|h)"}}
-					}}},
-					{IMMED(2) | SYMABS(2), {"^\\s*(\\w+)"}},
-					{IMMED(2) | SYMREL(2), {"^\\s*\\$(\\w+)"}},
-					{IMMED(2) | SYMADR(2), {"^\\s*&(\\w+)"}},
-					{MEM(2), {"^\\s*\\\*(\\d+)"}}
-				}}}
+				{NOFLAG, {"^\\s*,"}, {ADDR_MODE_PARSERS(2)}}
 			}
 		}},
 		{END, {"^\\s*\\.end"}}
