@@ -1,0 +1,6 @@
+#.bss (5)
+57 4F 52 44 0A 
+#tabela simbola
+#ime	sek	vr.	vid.	r.b.
+bss	bss	0	local	0
+word	bss	0	local	1

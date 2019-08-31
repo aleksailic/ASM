@@ -1,0 +1,10 @@
+#.data (2)
+94 19 
+#.text (4)
+24 8E 94 19 
+#tabela simbola
+#ime	sek	vr.	vid.	r.b.
+data	data	0	local	0
+test	data	0	local	1
+text	text	0	local	2
+main	text	0	global	3

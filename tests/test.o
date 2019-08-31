@@ -1,0 +1,10 @@
+#.ret.text
+#ofset	tip		vr[.text]:	
+0x0007	R_386_PC16	1
+0x000B	R_386_PC16	1
+#.text (13)
+24 26 00 32 0D BC 00 FF FF BC 00 FF FF 
+#tabela simbola
+#ime	sek	vr.	vid.	r.b.
+text	text	0	local	0
+printf	RELOC	65535	global	1

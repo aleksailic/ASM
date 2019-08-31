@@ -1,0 +1,22 @@
+#.ret.text
+#ofset	tip		vr[.text]:	
+0x0009	R_386_16	7
+0x000D	R_386_16	7
+0x001B	R_386_PC16	8
+#.data (6)
+00 00 00 00 94 19 
+#.rodata (2)
+05 06 
+#.text (43)
+8C 00 05 06 24 2A 2C BC 00 FF FF BC 00 FF FF 48 20 00 41 AC 00 0D 00 8C 2A BC 00 FF FF 28 2C 00 04 20 20 00 00 20 2C 2A 94 2A C4 
+#tabela simbola
+#ime	sek	vr.	vid.	r.b.
+data	data	0	local	0
+test	data	4	local	1
+rodata	rodata	0	local	2
+msg	rodata	0	local	3
+text	text	0	local	4
+main	text	0	global	5
+skip	text	33	local	6
+getchar	RELOC	65535	global	7
+printf	RELOC	65535	global	8
