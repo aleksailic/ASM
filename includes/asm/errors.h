@@ -13,22 +13,14 @@ static std::string string_format(const std::string& format, Args ... args) {
 }
 
 namespace ASM {
-	struct syntax_error : public std::exception {
+	class syntax_error : public std::exception {
 		std::string m_msg;
+	public:
 		syntax_error(const std::string& msg = "") : m_msg("Invalid syntax detected. " + msg) {}
-		syntax_error(int line_num, const std::string& line_data) {
-			m_msg = string_format("Invalid syntax detected @ line:%d = %s", line_num, line_data.c_str() );
-		}
-		syntax_error(int line_num, const std::string& line_data, const std::string& msg) {
-			m_msg = string_format("Invalid syntax detected. %s @ line:%d = %s", msg.c_str(), line_num, line_data.c_str());
-		}
 		virtual const char * what() const noexcept { return m_msg.c_str(); }
 	};
 	struct symbol_redeclaration : public syntax_error{
-		symbol_redeclaration(int line_num, const std::string& line_data)
-			: syntax_error(line_num, line_data, "Symbol redecleration not allowed") {}
-		symbol_redeclaration(int line_num, const std::string& line_data, const std::string& msg)
-			: syntax_error(line_num, line_data, "Symbol redecleration not allowed" + msg) {}
+		symbol_redeclaration(const std::string& msg = "") : syntax_error("Symbol redecleration not allowed. " + msg) {}
 	};
 }
 #endif

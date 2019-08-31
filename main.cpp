@@ -4,6 +4,29 @@
 
 #include "asm.h"
 
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+
+bool compareFiles(const std::string& p1, const std::string& p2) {
+	std::ifstream f1(p1, std::ifstream::binary | std::ifstream::ate);
+	std::ifstream f2(p2, std::ifstream::binary | std::ifstream::ate);
+
+	if (f1.fail() || f2.fail()) {
+		return false; //file problem
+	}
+
+	if (f1.tellg() != f2.tellg()) {
+		return false; //size mismatch
+	}
+
+	//seek back to beginning and use std::equal to compare contents
+	f1.seekg(0, std::ifstream::beg);
+	f2.seekg(0, std::ifstream::beg);
+	return std::equal(std::istreambuf_iterator<char>(f1.rdbuf()),
+		std::istreambuf_iterator<char>(),
+		std::istreambuf_iterator<char>(f2.rdbuf()));
+}
+
 static const ASM::parser get_parser(ASM::flags_t type) {
 	for (auto& parser : ASM::parsers) {
 		if (parser.flags & type)
@@ -156,11 +179,22 @@ TEST_CASE("Stream test") {
 
 }
 
+using string = std::string;
+string tests_path = "tests";
+
 TEST_CASE("Running testfiles") {
-	
+	std::set<string> set;
+	for (const auto & entry : fs::directory_iterator(tests_path))
+		set.emplace(entry.path().filename().replace_extension(""));
+	for (auto& name : set) {
+		ASM::init(tests_path + "/" + name + ".s", tests_path + "/" + name + ".tmp");
+		ASM::assemble();
+
+		REQUIRE(compareFiles(tests_path + "/" + name + ".tmp", tests_path + "/" + name + ".o"));
+		REQUIRE(fs::remove(tests_path + "/" + name + ".tmp"));
+	}
 }
 
-using string = std::string;
 
 int main(int argc, char* argv[]) {
 	try {
@@ -168,7 +202,7 @@ int main(int argc, char* argv[]) {
 		options.add_options()
 			("o,output", "Output file", cxxopts::value<string>()->default_value("a.o"))
 			("h,help", "Print help")
-			("t,test", "Run tests")
+			("t,test", "Run tests", cxxopts::value<string>()->implicit_value(tests_path))
 			("source", "Source file", cxxopts::value<string>());
 
 		options.positional_help("<SOURCE>");
@@ -183,6 +217,7 @@ int main(int argc, char* argv[]) {
 
 		if (result.count("test")) {
 			const char* args[] = { argv[0] };
+			tests_path = result["test"].as<string>();
 			Catch::Session().run(1, args);
 			exit(0);
 		}

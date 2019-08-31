@@ -12,7 +12,7 @@ INC_FLAGS := $(addprefix -I, $(INC_DIRS))
 CPPFLAGS ?= $(INC_FLAGS) -MMD -MP -Wall -std=c++17
 
 $(TARGET) : $(OBJS)
-	$(CC) $(LDFLAGS) $(OBJS) -o $@ $(LOADLIBES) $(LDLIBS)
+	$(CC) $(LDFLAGS) $(OBJS) -o $@ $(LOADLIBES) $(LDLIBS) -lstdc++fs 
 
 .PHONY: clean
 clean :

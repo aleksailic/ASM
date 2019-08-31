@@ -44,7 +44,7 @@ namespace ASM {
 		context_t context;
 	public:
 		source_iterator(string path) : source(path) { operator++(); }
-		self_type& operator++() {
+		self_type& operator++(){
 			// obtain new line from source and early exit if EOF reached
 			if (!std::getline(source, context.line)) {
 				context.line_num = EOF;
@@ -76,9 +76,10 @@ namespace ASM {
 			}
 
 			// if there are nonwhitespace characters not picked up by parsers that is syntax error
-			if (!std::all_of(line.begin(), line.end(), isspace))
-				throw syntax_error(context.line_num, line);
-
+			if (!std::all_of(line.begin(), line.end(), isspace)) {
+				throw syntax_error("Complete line was not processed. Leftover: " + line);
+			}
+				
 			// skip empty lines as they don't do anything to source code
 			return context.data.empty() ? operator++() : *this;
 		}
