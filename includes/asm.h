@@ -1,3 +1,11 @@
+/*
+	ASM: Assembler for a simple 16-bit 2-address processor
+	Copyright (C) 2019 Aleksa Ilic <aleksa.d.ilic@gmail.com>
+	This Source Code Form is subject to the terms of the Mozilla Public
+	License, v. 2.0. If a copy of the MPL was not distributed with this
+	file, You can obtain one at http://mozilla.org/MPL/2.0/.
+*/
+
 #ifndef __ASM_H__
 #define __ASM_H__
 

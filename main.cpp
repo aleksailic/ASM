@@ -1,3 +1,11 @@
+/*
+	ASM: Assembler for a simple 16-bit 2-address processor
+	Copyright (C) 2019 Aleksa Ilic <aleksa.d.ilic@gmail.com>
+	This Source Code Form is subject to the terms of the Mozilla Public
+	License, v. 2.0. If a copy of the MPL was not distributed with this
+	file, You can obtain one at http://mozilla.org/MPL/2.0/.
+*/
+
 #define CATCH_CONFIG_RUNNER
 #include "cxxopts.hpp"
 #include "catch.hpp"
@@ -197,7 +205,7 @@ TEST_CASE("Running testfiles") {
 
 int main(int argc, char* argv[]) {
 	try {
-		cxxopts::Options options(argv[0], "Assembler for a simple 16-bit 2-address processor with von Neumann architecture ");
+		cxxopts::Options options(argv[0], "Assembler for a simple 16-bit 2-address processor with von Neumann architecture");
 		options.add_options()
 			("o,output", "Output file", cxxopts::value<string>()->default_value("a.o"))
 			("h,help", "Print help")
