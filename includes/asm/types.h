@@ -219,7 +219,7 @@ namespace ASM {
 
 
 	// specialization for pretty hashvec output
-	std::ostream& operator<<(std::ostream& stream, const HashVec<Symbol>& symbols) {
+	std::ostream& operator<<(std::ostream& stream, const hashvec<Symbol>& symbols) {
 		stream << "#tabela simbola\n";
 		stream << "#ime" << '\t' << "sek" << '\t' << "vr." << '\t' << "vid." << '\t' << "r.b." << '\n';
 		for (const auto& symbol : symbols) {
@@ -227,7 +227,7 @@ namespace ASM {
 		}
 		return stream;
 	}
-	std::ostream& operator<<(std::ostream& stream, const HashVec<Constant>& constants) {
+	std::ostream& operator<<(std::ostream& stream, const hashvec<Constant>& constants) {
 		stream << "#tabela konstanti\n";
 		stream << "#ime" << '\t' << "vr." << '\t' << "r.b." << '\n';
 		for (const auto& constant : constants) {
@@ -235,7 +235,7 @@ namespace ASM {
 		}
 		return stream;
 	}
-	std::ostream& operator<<(std::ostream& stream, const HashVec<Section>& sections) {
+	std::ostream& operator<<(std::ostream& stream, const hashvec<Section>& sections) {
 		for (const auto& section : sections) {
 			if (section.counter == 0) continue;
 			stream << "#." << section.key << " (" << section.counter << ")\n";

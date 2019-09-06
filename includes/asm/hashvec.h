@@ -15,7 +15,7 @@ namespace ASM {
 	};
 
 	template <typename T, typename traits = hashvec_traits>
-	class HashVec {
+	class hashvec {
 		struct mapped_type : public T {
 			const std::string key;
 			const int index;
@@ -32,8 +32,8 @@ namespace ASM {
 		std::unordered_map<std::string, int> map;
 		std::vector<mapped_type> vec;
 	public:
-		HashVec() = default;
-		HashVec(std::initializer_list<init_type> list) {
+		hashvec() = default;
+		hashvec(std::initializer_list<init_type> list) {
 			for (auto& elem : list) {
 				put(elem.key, elem.value);
 			}
@@ -79,7 +79,7 @@ namespace ASM {
 		}
 
 		template <typename U>
-		friend std::ostream& operator<<(std::ostream& stream, const HashVec<U>& hashvec);
+		friend std::ostream& operator<<(std::ostream& stream, const hashvec<U>& hashvec);
 	};
 }
 

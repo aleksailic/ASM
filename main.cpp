@@ -1,7 +1,6 @@
 #define CATCH_CONFIG_RUNNER
 #include "cxxopts.hpp"
 #include "catch.hpp"
-
 #include "asm.h"
 
 #include <experimental/filesystem>
@@ -120,7 +119,7 @@ TEST_CASE("REGEX check") {
 
 TEST_CASE("HasVec structure check") {
 	using namespace ASM;
-	HashVec<std::string> symtable;
+	hashvec<std::string> symtable;
 
 	symtable["jovana"] = "jankovic";
 	symtable[0] = "milankovic";

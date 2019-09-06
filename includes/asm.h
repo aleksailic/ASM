@@ -7,11 +7,6 @@
 #include "asm/utils.h"
 #include "asm/types.h"
 
-#ifndef LITTLE_ENDIAN
-#define LITTLE_ENDIAN
-#endif
-
-
 namespace ASM {
 	using string = std::string;
 	using uint = unsigned int;
@@ -23,11 +18,11 @@ namespace ASM {
 		auto& error = std::cerr;
 	}
 
-	HashVec<Symbol> symtable;
-	HashVec<Section> sections;
+	hashvec<Symbol> symtable;
+	hashvec<Section> sections;
 	vector<Relocation> relocations;
-	HashVec<Constant> constants;
-	HashVec<Instruction, hashvec_traits_icase> optable = {
+	hashvec<Constant> constants;
+	hashvec<Instruction, hashvec_traits_icase> optable = {
 		{"nop", Nop},
 		{"halt", Nop},
 		{"xchg", E},
@@ -326,10 +321,10 @@ namespace ASM {
 		input_path = input;
 		output_path = output;
 	
-		symtable = HashVec<Symbol>{};
-		sections = HashVec<Section>{};
+		symtable = hashvec<Symbol>{};
+		sections = hashvec<Section>{};
 		relocations = vector<Relocation>{};
-		constants = HashVec<Constant>{};
+		constants = hashvec<Constant>{};
 	}
 
 	void assemble() {
