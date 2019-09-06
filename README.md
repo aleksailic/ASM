@@ -14,21 +14,14 @@ GCC 5+, GNU Make
 ### Installing and executing
 
 1. Start by cloning this git repository
-
 ```
-git clone https://github.com/aleksailic/ASM
+git clone https://github.com/aleksailic/ASM && cd ASM
 ```
-2. Change your path to newly created folder
-
-```
-cd ASM
-```
-3. Build project using make
-
+2. Build project using make
 ```
 make
 ```
-4. Execute the program (-h is help flag and will give further instructions)
+3. Execute the program (-h is help flag and will give further instructions)
 ```
 ./assembler -h
 ```
